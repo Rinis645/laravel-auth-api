@@ -18,14 +18,39 @@ class CommentController extends Controller implements HasMiddleware
         ];
     }
 
-    public function index(Post $post)
+    public function index(Request $request, Post $post)
     {
-        $comments = $post->comments()->get();
+        $query = $post->comments();
+
+        // determine user if a bearer token was provided (index/show bypass auth middleware)
+        $user = $request->user();
+        if (!$user && $request->bearerToken()) {
+            $user = \Illuminate\Support\Facades\Auth::guard('sanctum')->user();
+        }
+
+        // if the requesting user isn't the owner, hide flagged comments
+        if (!$user || $user->id !== $post->user_id) {
+            $query->whereNull('flagged_at');
+        }
+
+        $comments = $query->get();
         return response()->json($comments, 200);
     }
 
-    public function show(Comment $comment)
+    public function show(Request $request, Post $post, Comment $comment)
     {
+        // hide flagged comment from non-post owners
+        // note: $post is provided by the nested route but not used directly here
+        // resolve optional bearer token (show also bypasses auth middleware)
+        $user = $request->user();
+        if (!$user && $request->bearerToken()) {
+            $user = \Illuminate\Support\Facades\Auth::guard('sanctum')->user();
+        }
+
+        if ($comment->flagged_at && (!$user || $user->id !== $comment->post->user_id)) {
+            return response()->json(['message' => 'Not Found'], 404);
+        }
+
         return response()->json($comment, 200);
     }
 
@@ -46,26 +71,38 @@ class CommentController extends Controller implements HasMiddleware
     }
 
     public function update(Request $request, Post $post, Comment $comment)
-{
-    Gate::authorize('modify', $comment);
+    {
+        Gate::authorize('modify', $comment);
 
-    $validated = $request->validate([
-        'content' => 'required|string|max:1000',
-    ]);
+        $validated = $request->validate([
+            'content' => 'required|string|max:1000',
+        ]);
 
-    $comment->update($validated);
+        $comment->update($validated);
 
-    return response()->json($comment, 200);
-}
+        return response()->json($comment, 200);
+    }
 
-public function destroy(Post $post, Comment $comment)
-{
-    Gate::authorize('modify', $comment);
+    public function destroy(Post $post, Comment $comment)
+    {
+        Gate::authorize('modify', $comment);
 
-    $comment->delete();
+        $comment->delete();
 
-    return response()->json([
-        'message' => 'Comment deleted'
-    ], 200);
-}
+        return response()->json([
+            'message' => 'Comment deleted'
+        ], 200);
+    }
+
+    /**
+     * Flag a comment; only the post author can do this.
+     */
+    public function flag(Request $request, Post $post, Comment $comment)
+    {
+        Gate::authorize('flag', $comment);
+
+        $comment->update(['flagged_at' => now()]);
+
+        return response()->json($comment, 200);
+    }
 }

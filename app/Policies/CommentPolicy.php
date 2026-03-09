@@ -12,6 +12,16 @@ class CommentPolicy
     {
         return $user->id === $comment->user_id
             ? Response::allow()
-            : Response::deny('You do not own this comment');
+            : Response::deny('I am youre father, Luke...');
+    }
+
+    /**
+     * Only the post owner may flag a comment.
+     */
+    public function flag(User $user, Comment $comment): Response
+    {
+        return $user->id === $comment->post->user_id
+            ? Response::allow()
+            : Response::deny('Only the post author can flag comments');
     }
 }
